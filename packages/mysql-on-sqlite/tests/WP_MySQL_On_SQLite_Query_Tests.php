@@ -653,6 +653,70 @@ QUERY;
 		}
 	}
 
+	public function testParenthesizedUnionMembers() {
+		$this->assertQuery(
+			"CREATE TABLE t_union (
+				id bigint(20) unsigned NOT NULL auto_increment,
+				type varchar(20) NOT NULL default '',
+				status varchar(20) NOT NULL default '',
+				created datetime NOT NULL default '0000-00-00 00:00:00',
+				PRIMARY KEY (id)
+			)"
+		);
+		$this->assertQuery(
+			"INSERT INTO t_union (type, status, created) VALUES
+				('order', 'done', '2026-11-01 10:00:00'),
+				('order', 'done', '2026-11-22 11:00:00'),
+				('order', 'trash', '2020-01-01 00:00:00'),
+				('other', 'done', '2025-05-05 05:05:05')"
+		);
+
+		// The query that WooCommerce runs for the date range of the orders list.
+		$result = $this->assertQuery(
+			"SELECT MIN(created) AS min_date, MAX(created) AS max_date
+			FROM (
+				( SELECT created FROM t_union WHERE type = 'order' AND status != 'trash' ORDER BY created DESC LIMIT 1 )
+				UNION ALL
+				( SELECT created FROM t_union WHERE type = 'order' AND status != 'trash' ORDER BY created ASC LIMIT 1 )
+			) d"
+		);
+		$this->assertCount( 1, $result );
+		$this->assertSame( '2026-11-01 10:00:00', $result[0]->min_date );
+		$this->assertSame( '2026-11-22 11:00:00', $result[0]->max_date );
+
+		// ORDER BY and LIMIT inside each parenthesized operand apply to that operand.
+		$result = $this->assertQuery(
+			'( SELECT id FROM t_union ORDER BY id DESC LIMIT 1 ) UNION ALL ( SELECT id FROM t_union ORDER BY id ASC LIMIT 1 )'
+		);
+		$this->assertSame( array( '4', '1' ), array_column( $result, 'id' ) );
+
+		// Parenthesized operands without ORDER BY and LIMIT.
+		$result = $this->assertQuery( '(SELECT 1 AS a) UNION ALL (SELECT 2)' );
+		$this->assertSame( array( '1', '2' ), array_column( $result, 'a' ) );
+
+		// Parenthesized and plain operands can be mixed.
+		$result = $this->assertQuery(
+			'SELECT id FROM t_union WHERE id = 2 UNION ALL (SELECT id FROM t_union ORDER BY id DESC LIMIT 1)'
+		);
+		$this->assertSame( array( '2', '4' ), array_column( $result, 'id' ) );
+
+		// A single parenthesized query with its own ORDER BY and LIMIT.
+		$result = $this->assertQuery( '(SELECT id FROM t_union) ORDER BY id DESC LIMIT 2' );
+		$this->assertSame( array( '4', '3' ), array_column( $result, 'id' ) );
+
+		// The outer ORDER BY applies to the combined result.
+		$result = $this->assertQuery(
+			'(SELECT id FROM t_union WHERE id < 2) UNION ALL (SELECT id FROM t_union WHERE id > 3) ORDER BY id DESC'
+		);
+		$this->assertSame( array( '4', '1' ), array_column( $result, 'id' ) );
+
+		// Other set operations.
+		$result = $this->assertQuery(
+			'(SELECT id FROM t_union) EXCEPT (SELECT id FROM t_union WHERE id IN (1, 3)) ORDER BY id'
+		);
+		$this->assertSame( array( '2', '4' ), array_column( $result, 'id' ) );
+	}
+
 	private function assertQuery( $sql ) {
 		$statement = $this->engine->query( $sql, PDO::FETCH_OBJ );
 		if ( $statement->columnCount() > 0 ) {

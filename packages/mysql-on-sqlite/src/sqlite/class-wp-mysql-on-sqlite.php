@@ -4336,6 +4336,8 @@ class WP_MySQL_On_SQLite extends PDO {
 		switch ( $rule_name ) {
 			case 'queryExpression':
 				return $this->translate_query_expression( $node );
+			case 'queryTerm':
+				return $this->translate_query_term( $node );
 			case 'querySpecification':
 				return $this->translate_query_specification( $node );
 			case 'tableRef':
@@ -4810,6 +4812,20 @@ class WP_MySQL_On_SQLite extends PDO {
 		$has_intersect   = $query_term->has_child_token( WP_MySQL_Lexer::INTERSECT_SYMBOL );
 
 		/*
+		 * A parenthesized query body is translated to "SELECT * FROM (...)",
+		 * so only the output column names of the inner query are visible to
+		 * the outer ORDER BY. Table-qualified names can't be used there.
+		 *
+		 * @see WP_MySQL_On_SQLite::translate_query_term()
+		 */
+		$body_term             = $query_expr_main->get_first_child_node( 'queryTerm' );
+		$is_parenthesized_body = (
+			null !== $body_term
+			&& 1 === count( $body_term->get_children() )
+			&& $body_term->has_child_node( 'queryExpressionParens' )
+		);
+
+		/*
 		 * When the ORDER BY clause is present, we need to disambiguate the item
 		 * list and make sure they don't cause an "ambiguous column name" error.
 		 *
@@ -4817,7 +4833,7 @@ class WP_MySQL_On_SQLite extends PDO {
 		 */
 		$disambiguated_order_list = array();
 		$order_clause             = $node->get_first_child_node( 'orderClause' );
-		if ( $order_clause && ! $has_union && ! $has_except && ! $has_intersect ) {
+		if ( $order_clause && ! $has_union && ! $has_except && ! $has_intersect && ! $is_parenthesized_body ) {
 			/*
 			 * [GRAMMAR]
 			 * queryExpression: (withClause)? (
@@ -4863,6 +4879,43 @@ class WP_MySQL_On_SQLite extends PDO {
 		}
 
 		return $this->translate_sequence( $node->get_children() );
+	}
+
+	/**
+	 * Translate a MySQL query term node to SQLite.
+	 *
+	 * MySQL allows a parenthesized query expression as an operand of UNION,
+	 * EXCEPT, and INTERSECT, including with its own ORDER BY and LIMIT clauses:
+	 *
+	 *   (SELECT a FROM t ORDER BY a LIMIT 1) UNION ALL (SELECT a FROM t ORDER BY a DESC LIMIT 1)
+	 *
+	 * SQLite does not accept parentheses around compound SELECT operands, and
+	 * it does not accept ORDER BY or LIMIT inside them either. A parenthesized
+	 * operand is therefore rewritten as a subquery in the FROM clause:
+	 *
+	 *   SELECT * FROM (SELECT a FROM t ORDER BY a LIMIT 1) UNION ALL SELECT * FROM (...)
+	 *
+	 * @param  WP_Parser_Node $node       The "queryTerm" AST node.
+	 * @return string                     The translated value.
+	 * @throws WP_MySQL_On_SQLite_Exception When the translation fails.
+	 */
+	private function translate_query_term( WP_Parser_Node $node ): string {
+		/*
+		 * [GRAMMAR]
+		 * queryTerm:
+		 *   queryPrimary
+		 *   | queryExpressionParens
+		 *   | queryTerm INTERSECT_SYMBOL setOperationOption? queryTerm
+		 */
+		$children = $node->get_children();
+		if (
+			1 === count( $children )
+			&& $children[0] instanceof WP_Parser_Node
+			&& 'queryExpressionParens' === $children[0]->rule_name
+		) {
+			return 'SELECT * FROM ' . $this->translate( $children[0] );
+		}
+		return $this->translate_sequence( $children );
 	}
 
 	/**

@@ -1965,9 +1965,11 @@ class WP_MySQL_On_SQLite_Translation_Tests extends TestCase {
 			'SELECT t1.name AS t1_name FROM t1 JOIN t2 ON t2.id = t1.id ORDER BY `t1_name` DESC'
 		);
 
-		// With a parenthesized query body, the column should be disambiguated.
+		// A parenthesized query body is wrapped in a subquery, as SQLite does not
+		// accept parentheses there. Only the output column names are visible to
+		// the outer ORDER BY, so the item is not rewritten to "table.column".
 		$this->assertQuery(
-			'( ( ( SELECT `t1`.`name` FROM `t1` ) ) ) ORDER BY `t1`.`name`',
+			'SELECT * FROM ( SELECT * FROM ( SELECT * FROM ( SELECT `t1`.`name` FROM `t1` ) ) ) ORDER BY `name`',
 			'(((SELECT t1.name FROM t1))) ORDER BY name'
 		);
 

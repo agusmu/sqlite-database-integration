@@ -69,6 +69,7 @@ class WP_SQLite_PDO_User_Defined_Functions {
 		'regexp_substr'                => 'regexp_substr',
 		'regexp_instr'                 => 'regexp_instr',
 		'field'                        => 'field',
+		'find_in_set'                  => 'find_in_set',
 		'log'                          => 'log',
 		'least'                        => 'least',
 		'greatest'                     => 'greatest',
@@ -855,6 +856,35 @@ class WP_SQLite_PDO_User_Defined_Functions {
 			}
 		}
 
+		return 0;
+	}
+
+	/**
+	 * Method to emulate MySQL FIND_IN_SET() function.
+	 *
+	 * Returns the 1-based position of $needle in the comma-separated $haystack,
+	 * 0 when it is not in the list, and NULL when either argument is NULL.
+	 * The comparison is case-insensitive, like the default MySQL collations.
+	 *
+	 * @param string|null $needle   The string to look for.
+	 * @param string|null $haystack The comma-separated list.
+	 *
+	 * @return int|null
+	 */
+	public function find_in_set( $needle, $haystack ) {
+		if ( null === $needle || null === $haystack ) {
+			return null;
+		}
+		$haystack = (string) $haystack;
+		if ( '' === $haystack ) {
+			return 0;
+		}
+		$needle = strtolower( (string) $needle );
+		foreach ( explode( ',', $haystack ) as $i => $item ) {
+			if ( strtolower( $item ) === $needle ) {
+				return $i + 1;
+			}
+		}
 		return 0;
 	}
 

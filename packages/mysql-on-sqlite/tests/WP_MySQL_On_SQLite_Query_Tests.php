@@ -653,6 +653,31 @@ QUERY;
 		}
 	}
 
+	public function testFindInSet() {
+		// Literal arguments: 1-based position, 0 when missing, NULL when either argument is NULL.
+		$result = $this->assertQuery(
+			"SELECT FIND_IN_SET('b', 'a,b,c') AS pos, FIND_IN_SET('d', 'a,b,c') AS missing, FIND_IN_SET('B', 'a,b,c') AS ci,
+				FIND_IN_SET('b,c', 'a,b,c') AS with_comma, FIND_IN_SET('', '') AS empty_list, FIND_IN_SET('', 'a,,c') AS empty_item,
+				FIND_IN_SET(NULL, 'a') AS null_needle, FIND_IN_SET('a', NULL) AS null_list"
+		);
+		$this->assertSame( '2', (string) $result[0]->pos );
+		$this->assertSame( '0', (string) $result[0]->missing );
+		$this->assertSame( '2', (string) $result[0]->ci );
+		$this->assertSame( '0', (string) $result[0]->with_comma );
+		$this->assertSame( '0', (string) $result[0]->empty_list );
+		$this->assertSame( '2', (string) $result[0]->empty_item );
+		$this->assertNull( $result[0]->null_needle );
+		$this->assertNull( $result[0]->null_list );
+
+		// A column as the list, like Tutor LMS runs it: WHERE FIND_IN_SET( 'login', display_on ).
+		$this->assertQuery( 'CREATE TABLE t_consents (id int NOT NULL auto_increment, display_on varchar(100) NOT NULL default \'\', PRIMARY KEY (id))' );
+		$this->assertQuery( "INSERT INTO t_consents (display_on) VALUES ('login,register'), ('checkout'), ('register,login'), ('')" );
+		$result = $this->assertQuery( "SELECT id FROM t_consents WHERE FIND_IN_SET( 'login', display_on ) ORDER BY id" );
+		$this->assertSame( array( '1', '3' ), array_column( $result, 'id' ) );
+		$result = $this->assertQuery( "SELECT id FROM t_consents WHERE FIND_IN_SET( 'login', display_on ) = 2" );
+		$this->assertSame( array( '3' ), array_column( $result, 'id' ) );
+	}
+
 	public function testParenthesizedUnionMembers() {
 		$this->assertQuery(
 			"CREATE TABLE t_union (
